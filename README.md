@@ -109,3 +109,5 @@ Technical Flow in Code
 ![alt text](image-3.png)
 The power of this system comes from the fact that it only needs a short sample of someone's voice to clone it, making it a true "few-shot" or even "one-shot" learning system. The speaker encoder creates a voice identity that can be applied to any new text with any desired emotion.
 
+Directory Structure
+![alt text](image-4.png)
