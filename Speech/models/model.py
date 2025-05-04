@@ -11,7 +11,7 @@ from typing import Dict, List, Tuple, Optional, Union
 from .text_encoder import TextEncoder
 from .speaker_encoder import SpeakerEncoder
 from .emotion_encoder import EmotionEncoder
-from .decoder import MelSpecDecoder
+from .decoder import MelSpectrogram2Decoder as MelSpecDecoder
 from .vocoder import HiFiGANVocoder
 
 class VoiceCloningModel(nn.Module):
