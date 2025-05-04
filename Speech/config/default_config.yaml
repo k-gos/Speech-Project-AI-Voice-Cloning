@@ -1,0 +1,61 @@
+# Voice Cloning Model Configuration
+
+# Audio parameters
+audio:
+  sampling_rate: 22050
+  n_fft: 1024
+  hop_length: 256
+  win_length: 1024
+  mel_channels: 80
+  fmin: 0
+  fmax: 8000
+  max_audio_length: 10  # seconds
+
+# Model architecture parameters
+model:
+  d_model: 512
+  speaker_embedding_dim: 256
+  emotion_embedding_dim: 128
+  
+  # Text encoder
+  text_encoder_layers: 6
+  text_encoder_heads: 8
+  
+  # Decoder
+  decoder_layers: 6
+  decoder_heads: 8
+  decoder_hidden_size: 1024
+  
+  # Vocoder
+  vocoder_upsample_rates: [8, 8, 4, 2]
+  vocoder_upsample_kernel_sizes: [16, 16, 8, 4]
+  vocoder_upsample_initial_channel: 512
+  vocoder_resblock_kernel_sizes: [3, 7, 11]
+
+# Training parameters
+training:
+  batch_size: 16
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  grad_clip_thresh: 1.0
+  mel_loss_weight: 1.0
+  feature_loss_weight: 0.1
+  
+  # Optimization
+  optimizer: "adam"
+  scheduler_patience: 3
+  scheduler_factor: 0.5
+  
+  # Training setup
+  num_epochs: 100
+  log_interval: 10
+  save_interval: 5
+  
+# Available emotions
+emotions:
+  - "neutral"
+  - "happy"
+  - "sad"
+  - "angry"
+  - "surprised"
+  - "fear"
