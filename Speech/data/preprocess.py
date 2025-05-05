@@ -16,6 +16,7 @@ from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 import logging
 import shutil
+import soundfile
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -206,6 +207,7 @@ class DatasetPreprocessor:
         logger.info("Preprocessing LJSpeech dataset...")
         
         input_dir = Path(input_dir)
+        logger.info(input_dir)
         metadata_path = input_dir / "metadata.csv"
         wavs_dir = input_dir / "wavs"
         
