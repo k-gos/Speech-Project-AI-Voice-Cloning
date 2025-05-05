@@ -73,7 +73,7 @@ def run_preprocessing(args):
     cmd = [
         "python", "data/preprocess.py",
         "--dataset", args.dataset,
-        "--input-dir", args.input_dir,
+        "--input-dir", "script/"+args.input_dir,
         "--output-dir", args.output_dir,
         "--num-workers", str(args.num_workers),
         "--config", args.config,
@@ -161,8 +161,8 @@ def main():
                         help=f"Number of worker processes (default: {multiprocessing.cpu_count()})")
     parser.add_argument("-c", "--config", type=str, default="config/default_config.yaml",
                         help="Path to config file (default: config/default_config.yaml)")
-    parser.add_argument("-l", "--log-dir", type=str, default="logs/preprocessing",
-                        help="Directory for log files (default: logs/preprocessing)")
+    parser.add_argument("-l", "--log-dir", type=str, default="script/logs/preprocessing",
+                        help="Directory for log files (default: script/logs/preprocessing)")
     parser.add_argument("-m", "--max-audio-len", type=float, default=10.0,
                         help="Maximum audio length in seconds (default: 10.0)")
     parser.add_argument("--no-cache", dest="use_cache", action="store_false",
@@ -176,6 +176,7 @@ def main():
     
     args = parser.parse_args()
     
+    print(args)
     # Run preprocessing
     success = run_preprocessing(args)
     
