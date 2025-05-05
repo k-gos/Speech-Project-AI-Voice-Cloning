@@ -113,12 +113,46 @@ class Trainer:
     def _init_model(self):
         """Initialize the model"""
         print("Initializing model...")
-        self.model = VoiceCloningModel(
-            speaker_encoder_path=self.args.speaker_encoder,
-            vocoder_path=self.args.vocoder
-        )
+
+        # Get model configurations from config file
+        model_config = self.config.get('model', {})
+
+        # CRITICAL FIX: Create a clean config dict without unexpected arguments
+        clean_config = {
+            'd_model': model_config.get('d_model', 512),
+            'use_emotion_encoder': model_config.get('use_emotion_encoder', False)
+        }
+
+        # Initialize model with proper parameters
+        self.model = VoiceCloningModel(config=clean_config)
+
+        # If speaker encoder path is provided, try to load it separately
+        if hasattr(self.args, 'speaker_encoder') and self.args.speaker_encoder:
+            print(f"Loading pretrained speaker encoder from {self.args.speaker_encoder}")
+            try:
+                # Check if load_pretrained method exists
+                if hasattr(self.model.speaker_encoder, 'load_pretrained'):
+                    self.model.speaker_encoder.load_pretrained(self.args.speaker_encoder)
+                else:
+                    print("Warning: speaker_encoder has no load_pretrained method")
+            except Exception as e:
+                print(f"Warning: Failed to load pretrained speaker encoder: {e}")
+
+        # If vocoder path is provided, try to load it separately
+        if hasattr(self.args, 'vocoder') and self.args.vocoder:
+            print(f"Loading pretrained vocoder from {self.args.vocoder}")
+            try:
+                # Check if load_pretrained method exists
+                if hasattr(self.model.vocoder, 'load_pretrained'):
+                    self.model.vocoder.load_pretrained(self.args.vocoder)
+                else:
+                    print("Warning: vocoder has no load_pretrained method")
+            except Exception as e:
+                print(f"Warning: Failed to load pretrained vocoder: {e}")
+
+        # Move model to device
         self.model.to(self.device)
-        
+
         # Count parameters
         total_params = sum(p.numel() for p in self.model.parameters())
         print(f"Total parameters: {total_params:,}")

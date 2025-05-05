@@ -1,0 +1,24 @@
+{
+  "model": {
+    "name": "voice_clone_model",
+    "hidden_dim": 512,
+    "embedding_dim": 256,
+    "n_layers": 6,
+    "dropout": 0.1
+  },
+  "training": {
+    "batch_size": 16,
+    "learning_rate": 0.0001,
+    "scheduler": "noam",
+    "warmup_steps": 4000,
+    "epochs": 100,
+    "checkpoint_interval": 5000,
+    "eval_interval": 1000,
+    "grad_clip_thresh": 1.0
+  },
+  "data": {
+    "processed_dir": "path/to/processed/data",
+    "mel_channels": 80,
+    "segment_length": 8192
+  }
+}

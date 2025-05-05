@@ -1,229 +1,148 @@
-"""
-Main voice cloning model integrating all components
-"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import Dict, List, Tuple, Optional, Union
+from typing import Dict, Optional, List, Tuple
 
-# Import model components
 from .text_encoder import TextEncoder
 from .speaker_encoder import SpeakerEncoder
-from .emotion_encoder import EmotionEncoder
-from .decoder import MelSpectrogram2Decoder as MelSpecDecoder
+from .decoder import MelSpectrogram2Decoder
 from .vocoder import HiFiGANVocoder
+
+# Import emotion encoder if it exists
+try:
+    from .emotion_encoder import EmotionEncoder
+    has_emotion_encoder = True
+except ImportError:
+    has_emotion_encoder = False
 
 class VoiceCloningModel(nn.Module):
     """
-    Complete voice cloning model integrating all components
+    Complete voice cloning model that combines text encoding, speaker encoding, 
+    decoding and vocoding
     """
-    def __init__(self, 
-                 d_model: int = 512,
-                 speaker_embedding_dim: int = 256,
-                 emotion_embedding_dim: int = 128,
-                 mel_channels: int = 80,
-                 use_pretrained_speaker_encoder: bool = True,
-                 speaker_encoder_path: Optional[str] = None,
-                 use_pretrained_vocoder: bool = True,
-                 vocoder_path: Optional[str] = None):
-        """
-        Initialize voice cloning model
-        
-        Args:
-            d_model: Model dimension
-            speaker_embedding_dim: Speaker embedding dimension
-            emotion_embedding_dim: Emotion embedding dimension
-            mel_channels: Number of mel spectrogram channels
-            use_pretrained_speaker_encoder: Whether to use pretrained speaker encoder
-            speaker_encoder_path: Path to pretrained speaker encoder
-            use_pretrained_vocoder: Whether to use pretrained vocoder
-            vocoder_path: Path to pretrained vocoder
-        """
+    def __init__(self, config: Dict = None):
         super().__init__()
+        self.config = config or {}
         
-        self.d_model = d_model
-        self.speaker_embedding_dim = speaker_embedding_dim
-        self.emotion_embedding_dim = emotion_embedding_dim
-        self.mel_channels = mel_channels
+        # Get parameters from config with defaults
+        self.d_model = self.config.get('d_model', 512)
+        self.use_emotion_encoder = self.config.get('use_emotion_encoder', False)
         
-        # Initialize text encoder
-        self.text_encoder = TextEncoder(d_model=d_model, use_bert=True)
-        
-        # Initialize speaker encoder
-        self.speaker_encoder = SpeakerEncoder(
-            embedding_dim=speaker_embedding_dim,
-            use_pretrained=use_pretrained_speaker_encoder,
-            pretrained_path=speaker_encoder_path
+        # Initialize text encoder with appropriate parameters
+        text_config = self.config.get('text_encoder', {})
+        self.text_encoder = TextEncoder(
+            model_name=text_config.get('model_name', 'bert-base-uncased'),
+            output_dim=self.d_model,
+            max_text_length=text_config.get('max_text_length', 200)
         )
         
-        # Initialize emotion encoder
-        self.emotion_encoder = EmotionEncoder(embedding_dim=emotion_embedding_dim)
+        # Initialize speaker encoder
+        self.speaker_encoder = SpeakerEncoder(self.config.get('speaker_encoder', {}))
+        
+        # Initialize emotion encoder if needed and available
+        if self.use_emotion_encoder and has_emotion_encoder:
+            emotion_config = self.config.get('emotion_encoder', {})
+            self.emotion_encoder = EmotionEncoder(
+                emotion_dim=emotion_config.get('emotion_dim', self.d_model)
+            )
         
         # Initialize decoder
-        self.decoder = MelSpecDecoder(
-            d_model=d_model,
-            speaker_embedding_dim=speaker_embedding_dim,
-            emotion_embedding_dim=emotion_embedding_dim,
-            mel_channels=mel_channels
+        decoder_config = self.config.get('decoder', {})
+        self.decoder = MelSpectrogram2Decoder(
+            d_model=self.d_model,
+            nhead=decoder_config.get('nhead', 8),
+            num_decoder_layers=decoder_config.get('num_decoder_layers', 6),
+            dim_feedforward=decoder_config.get('dim_feedforward', 2048),
+            dropout=decoder_config.get('dropout', 0.1),
+            mel_channels=decoder_config.get('mel_channels', 80)
         )
         
         # Initialize vocoder
-        self.vocoder = HiFiGANVocoder(
-            mel_channels=mel_channels,
-            use_pretrained=use_pretrained_vocoder,
-            pretrained_path=vocoder_path
-        )
+        self.vocoder = HiFiGANVocoder(self.config.get('vocoder', {}))
         
-        # Freeze speaker encoder if using pretrained
-        if use_pretrained_speaker_encoder:
-            for param in self.speaker_encoder.parameters():
-                param.requires_grad = False
-                
-        # Freeze vocoder if using pretrained
-        if use_pretrained_vocoder:
-            for param in self.vocoder.parameters():
-                param.requires_grad = False
-    
-    def forward(self, 
-                text: Union[str, List[str]],
-                speaker_embedding: Optional[torch.Tensor] = None,
-                emotion: str = "neutral",
-                emotion_reference: Optional[Union[str, np.ndarray]] = None,
-                target_mel: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
+    def forward(self,
+                text: List[str],
+                speaker_embeddings: torch.Tensor,
+                emotion_labels: Optional[List[str]] = None,
+                mel_targets: Optional[torch.Tensor] = None,
+                teacher_forcing_ratio: float = 1.0) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Forward pass through the model
+        Forward pass of the voice cloning model
         
         Args:
-            text: Input text or list of texts
-            speaker_embedding: Speaker embedding (if None, extracted from target_mel)
-            emotion: Target emotion
-            emotion_reference: Reference audio for emotion (path or waveform)
-            target_mel: Target mel spectrogram (for teacher forcing in training)
+            text: List of text strings to synthesize
+            speaker_embeddings: Speaker embeddings (batch_size, speaker_dim)
+            emotion_labels: Optional emotion labels
+            mel_targets: Optional mel spectrogram targets for training
+            teacher_forcing_ratio: Teacher forcing ratio for training
             
         Returns:
-            Dictionary with model outputs
+            mel_outputs: Generated mel spectrograms
+            stop_outputs: Stop token predictions
+            waveform: Generated audio waveforms (inference only)
         """
         # Encode text
-        text_memory, text_mask = self.text_encoder(text)
+        text_memory = self.text_encoder(text)
         
-        # Get speaker embedding if not provided
-        if speaker_embedding is None and target_mel is not None:
-            # Extract from target mel
-            speaker_embedding = self.speaker_encoder(target_mel)
+        # Process emotion if available
+        emotion_embeddings = None
+        if self.use_emotion_encoder and hasattr(self, 'emotion_encoder') and emotion_labels is not None:
+            emotion_embeddings = self.emotion_encoder(emotion_labels)
         
-        if speaker_embedding is None:
-            raise ValueError("Speaker embedding or target_mel must be provided")
+        # Decode to mel spectrogram
+        if mel_targets is not None:
+            # Training mode
+            mel_outputs, stop_outputs = self.decoder(
+                text_memory=text_memory,
+                speaker_embedding=speaker_embeddings,
+                emotion_embedding=emotion_embeddings,
+                mel_targets=mel_targets,
+                teacher_forcing_ratio=teacher_forcing_ratio
+            )
+            return mel_outputs, stop_outputs, None
+        else:
+            # Inference mode
+            mel_outputs, stop_outputs = self.decoder.inference(
+                text_memory=text_memory,
+                speaker_embedding=speaker_embeddings,
+                emotion_embedding=emotion_embeddings
+            )
             
-        # Get emotion embedding
-        emotion_embedding = self.emotion_encoder.get_emotion_embedding(
-            emotion=emotion,
-            acoustic_reference=emotion_reference
-        )
-        
-        # Generate mel spectrogram with decoder
-        mel_output = self.decoder(
-            text_memory=text_memory,
-            text_mask=text_mask,
-            speaker_embedding=speaker_embedding,
-            emotion_embedding=emotion_embedding,
-            target_mel=target_mel
-        )
-        
-        # Generate waveform with vocoder if not training
-        waveform = None
-        if target_mel is None:  # Inference mode
-            waveform = self.vocoder(mel_output)
-        
-        return {
-            "text_memory": text_memory,
-            "text_mask": text_mask,
-            "speaker_embedding": speaker_embedding,
-            "emotion_embedding": emotion_embedding,
-            "mel_output": mel_output,
-            "waveform": waveform
-        }
-    
-    def clone_voice(self,
-                   text: str,
-                   reference_audio: Union[str, np.ndarray],
-                   emotion: str = "neutral",
-                   emotion_reference: Optional[Union[str, np.ndarray]] = None) -> np.ndarray:
-        """
-        Clone voice and generate speech
-        
-        Args:
-            text: Text to synthesize
-            reference_audio: Reference audio for speaker (path or waveform)
-            emotion: Target emotion
-            emotion_reference: Reference audio for emotion (path or waveform)
+            # Generate waveform with vocoder
+            waveform = self.vocoder.inference(mel_outputs)
             
-        Returns:
-            Generated waveform
-        """
-        # Extract speaker embedding from reference audio
-        speaker_embedding = self.speaker_encoder.extract_embedding(reference_audio)
-        
-        # Forward pass with speaker embedding
-        outputs = self.forward(
-            text=text,
-            speaker_embedding=speaker_embedding,
-            emotion=emotion,
-            emotion_reference=emotion_reference
-        )
-        
-        # Return waveform
-        return outputs["waveform"].squeeze(0).cpu().numpy()
+            return mel_outputs, stop_outputs, waveform
 
 
 class VoiceCloningLoss(nn.Module):
-    """
-    Loss function for voice cloning model
-    """
-    def __init__(self, 
-                 mel_loss_weight: float = 1.0,
-                 feature_loss_weight: float = 0.1):
-        """
-        Initialize loss function
-        
-        Args:
-            mel_loss_weight: Weight for mel spectrogram reconstruction loss
-            feature_loss_weight: Weight for feature matching loss
-        """
+    """Loss function for voice cloning model"""
+    
+    def __init__(self):
         super().__init__()
-        self.mel_loss_weight = mel_loss_weight
-        self.feature_loss_weight = feature_loss_weight
+        self.mel_loss = nn.MSELoss()
+        self.stop_loss = nn.BCEWithLogitsLoss()
         
     def forward(self, 
-                predicted_mel: torch.Tensor, 
-                target_mel: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+                mel_outputs: torch.Tensor, 
+                stop_outputs: torch.Tensor,
+                mel_targets: torch.Tensor, 
+                stop_targets: torch.Tensor) -> torch.Tensor:
         """
-        Calculate loss
+        Compute the total loss
         
         Args:
-            predicted_mel: Predicted mel spectrogram [batch, time, mel_channels]
-            target_mel: Target mel spectrogram [batch, time, mel_channels]
+            mel_outputs: Predicted mel spectrograms
+            stop_outputs: Predicted stop tokens
+            mel_targets: Target mel spectrograms
+            stop_targets: Target stop tokens
             
         Returns:
-            Tuple of (total_loss, loss_components)
+            total_loss: Combined loss value
         """
-        # L1 loss for mel reconstruction
-        mel_l1_loss = F.l1_loss(predicted_mel, target_mel)
+        mel_loss = self.mel_loss(mel_outputs, mel_targets)
+        stop_loss = self.stop_loss(stop_outputs, stop_targets)
         
-        # Mean squared error for spectrogram
-        mel_mse_loss = F.mse_loss(predicted_mel, target_mel)
+        # Weighted sum of losses
+        total_loss = mel_loss + stop_loss
         
-        # Feature matching loss (simplified version)
-        feature_loss = torch.zeros_like(mel_l1_loss)
-        
-        # Calculate total loss
-        total_loss = (
-            self.mel_loss_weight * (mel_l1_loss + mel_mse_loss) + 
-            self.feature_loss_weight * feature_loss
-        )
-        
-        return total_loss, {
-            "mel_l1_loss": mel_l1_loss,
-            "mel_mse_loss": mel_mse_loss,
-            "feature_loss": feature_loss
-        }
+        return total_loss
