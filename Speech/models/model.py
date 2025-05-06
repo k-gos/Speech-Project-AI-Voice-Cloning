@@ -1,3 +1,12 @@
+# Add this at the beginning of your script to disable Flash Attention
+import os
+os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+# Force transformers to not use Flash Attention
+import transformers
+transformers.utils.is_flash_attn_available = lambda: False
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -30,8 +39,8 @@ class VoiceCloningModel(nn.Module):
         
         # Initialize text encoder with appropriate parameters
         text_config = self.config.get('text_encoder', {})
+        # Update TextEncoder initialization
         self.text_encoder = TextEncoder(
-            model_name=text_config.get('model_name', 'bert-base-uncased'),
             output_dim=self.d_model,
             max_text_length=text_config.get('max_text_length', 200)
         )
